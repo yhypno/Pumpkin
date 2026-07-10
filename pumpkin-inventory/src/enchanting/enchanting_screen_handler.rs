@@ -8,7 +8,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
 use pumpkin_data::statistic::{CustomStatistic, StatisticCategory};
 use pumpkin_data::tag::{Enchantment as EnchantmentTag, Taggable};
-use pumpkin_util::random::RandomImpl;
+use pumpkin_util::random::{RandomImpl, legacy_rand::LegacyRand};
 use pumpkin_world::inventory::Inventory;
 
 use crate::{
@@ -81,9 +81,7 @@ impl EnchantingTableScreenHandler {
                     self.enchantment_level[i] = -1;
                 }
             } else {
-                let mut random = pumpkin_util::random::xoroshiro128::Xoroshiro::from_seed(
-                    self.enchantment_seed as u64,
-                );
+                let mut random = LegacyRand::from_seed(self.enchantment_seed as u64);
 
                 for i in 0..3 {
                     let level = self.calculate_level_requirement(&mut random, i, enchantability);
@@ -92,18 +90,22 @@ impl EnchantingTableScreenHandler {
 
                 for i in 0..3 {
                     if self.level_requirements[i] > 0 {
+                        let mut random = self.create_enchantment_random(i);
                         let enchantments = Self::get_enchantment_list(
                             &mut random,
                             &item,
                             i,
                             self.level_requirements[i],
                         );
-                        if let Some(first) = enchantments.first() {
-                            self.enchantment_id[i] = first.0.id as i32;
-                            self.enchantment_level[i] = first.1;
-                        } else {
+                        if enchantments.is_empty() {
                             self.enchantment_id[i] = -1;
                             self.enchantment_level[i] = -1;
+                        } else {
+                            let clue_index =
+                                random.next_bounded_i32(enchantments.len() as i32) as usize;
+                            let clue = enchantments[clue_index];
+                            self.enchantment_id[i] = clue.0.id as i32;
+                            self.enchantment_level[i] = clue.1;
                         }
                     } else {
                         self.enchantment_id[i] = -1;
@@ -117,7 +119,7 @@ impl EnchantingTableScreenHandler {
 
     fn calculate_level_requirement(
         &self,
-        random: &mut pumpkin_util::random::xoroshiro128::Xoroshiro,
+        random: &mut LegacyRand,
         slot: usize,
         _enchantability: i32,
     ) -> i32 {
@@ -132,8 +134,12 @@ impl EnchantingTableScreenHandler {
         }
     }
 
+    const fn create_enchantment_random(&self, slot: usize) -> LegacyRand {
+        LegacyRand::from_seed(self.enchantment_seed.wrapping_add(slot as i32) as u64)
+    }
+
     fn get_enchantment_list(
-        random: &mut pumpkin_util::random::xoroshiro128::Xoroshiro,
+        random: &mut LegacyRand,
         item: &ItemStack,
         _slot: usize,
         level: i32,
@@ -327,9 +333,7 @@ impl ScreenHandler for EnchantingTableScreenHandler {
                 return false;
             }
 
-            let mut random = pumpkin_util::random::xoroshiro128::Xoroshiro::from_seed(
-                self.enchantment_seed as u64,
-            );
+            let mut random = self.create_enchantment_random(id as usize);
             let enchantments =
                 Self::get_enchantment_list(&mut random, &item_stack, id as usize, level_req);
 
