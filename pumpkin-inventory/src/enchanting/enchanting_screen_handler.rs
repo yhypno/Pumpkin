@@ -17,9 +17,43 @@ use crate::{
         InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
         ScreenHandlerFuture, offer_or_drop_stack,
     },
-    slot::NormalSlot,
+    slot::{BoxFuture, NormalSlot, Slot},
     window_property::{EnchantmentTable, WindowProperty},
 };
+
+struct LapisSlot(NormalSlot);
+
+fn is_lapis(stack: &ItemStack) -> bool {
+    stack.item == &Item::LAPIS_LAZULI
+}
+
+impl LapisSlot {
+    fn new(inventory: Arc<dyn Inventory>) -> Self {
+        Self(NormalSlot::new(inventory, 1))
+    }
+}
+
+impl Slot for LapisSlot {
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.0.get_inventory()
+    }
+
+    fn get_index(&self) -> usize {
+        self.0.get_index()
+    }
+
+    fn set_id(&self, id: usize) {
+        self.0.set_id(id);
+    }
+
+    fn can_insert<'a>(&'a self, stack: &'a ItemStack) -> BoxFuture<'a, bool> {
+        Box::pin(async move { is_lapis(stack) })
+    }
+
+    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
+        self.0.mark_dirty()
+    }
+}
 
 pub struct EnchantingTableScreenHandler {
     pub inventory: Arc<dyn Inventory>,
@@ -51,7 +85,7 @@ impl EnchantingTableScreenHandler {
 
         // Enchanting slots: 0 is item, 1 is lapis
         handler.add_slot(Arc::new(NormalSlot::new(inventory.clone(), 0)));
-        handler.add_slot(Arc::new(NormalSlot::new(inventory.clone(), 1)));
+        handler.add_slot(Arc::new(LapisSlot::new(inventory.clone())));
 
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
         handler.add_player_slots(&player_inventory);
@@ -320,7 +354,9 @@ impl ScreenHandler for EnchantingTableScreenHandler {
             let lapis_cost = (id + 1) as u8;
 
             if !player.is_creative()
-                && (lapis_stack.is_empty() || lapis_stack.item_count < lapis_cost)
+                && (lapis_stack.is_empty()
+                    || !is_lapis(&lapis_stack)
+                    || lapis_stack.item_count < lapis_cost)
             {
                 return false;
             }
@@ -446,5 +482,16 @@ impl ScreenHandler for EnchantingTableScreenHandler {
                 self.update_enchantments(player).await;
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lapis_slot_only_accepts_lapis_lazuli() {
+        assert!(is_lapis(&ItemStack::new(1, &Item::LAPIS_LAZULI)));
+        assert!(!is_lapis(&ItemStack::new(1, &Item::DIRT)));
     }
 }
